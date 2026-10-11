@@ -1,0 +1,111 @@
+name: Finalize Majenta Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore approved source package
+        shell: bash
+        run: |
+          set -euo pipefail
+          find . -mindepth 1 -maxdepth 1 ! -name .git ! -name .github -exec rm -rf {} +
+          curl -L --fail --retry 3 \
+            'https://vk3vqafpz12hai4a.public.blob.vercel-storage.com/majenta-blueprint-to-built-reality-N37Ijiw4PDi1TcsX37CbovNHpXjXgx.zip?download=1' \
+            -o /tmp/majenta-build.zip
+          rm -rf /tmp/majenta-build
+          mkdir -p /tmp/majenta-build
+          unzip -q /tmp/majenta-build.zip -d /tmp/majenta-build
+          cp -a /tmp/majenta-build/majenta-final/. .
+          rm -rf node_modules dist
+
+      - name: Optimize 3D runtime model
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes @gltf-transform/cli@4.5.1 simplify \
+            public/model.glb /tmp/model-opt.glb \
+            --ratio 0.05 --error 0.01
+          npx --yes @gltf-transform/cli@4.5.1 optimize \
+            /tmp/model-opt.glb public/model-web.glb \
+            --simplify false \
+            --compress meshopt \
+            --texture-compress webp \
+            --texture-size 2048
+          npx --yes @gltf-transform/cli@4.5.1 inspect public/model-web.glb
+          rm public/model.glb
+
+      - name: Point runtime at optimized model
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("src/main.js")
+          s = p.read_text()
+          s = s.replace("'/model.glb'", "'/model-web.glb'")
+          p.write_text(s)
+
+          r = Path("README.md")
+          t = r.read_text()
+          old = """The ZIP includes the exact Meshy-generated master model at `public/model.glb` (~310 MB / 7.87M triangles).
+          For a public production deployment, create a compressed derivative and change the loader path while preserving the master separately."""
+          new = """The repository ships the optimized runtime model at `public/model-web.glb`.
+
+          Runtime model:
+          - ~13 MB transfer size
+          - ~1.08M triangles
+          - Meshopt geometry compression
+          - Quantized vertex attributes
+          - WebP textures capped at 2048px
+
+          The original ~296 MB / 7.87M-triangle Meshy master is intentionally excluded from Git history and should be retained separately as the immutable source asset."""
+          t = t.replace(old, new)
+          r.write_text(t)
+          PY
+
+          cat > .gitignore <<'EOF'
+          node_modules/
+          dist/
+          .DS_Store
+          public/model.glb
+          *.log
+          EOF
+
+      - name: Install, audit and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm audit --audit-level=high
+          npm run build
+          test -f dist/index.html
+          test -f dist/model-web.glb
+          test ! -f public/model.glb
+          grep -q "model-web.glb" src/main.js
+
+      - name: Commit final optimized build
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf node_modules dist
+          git config user.name "Majenta Build Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Finalize optimized Majenta website build"
+            git push origin HEAD:main
+          fi
