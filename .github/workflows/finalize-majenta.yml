@@ -2,6 +2,11 @@ name: Finalize Majenta Build
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/finalize-majenta.yml'
 
 permissions:
   contents: write
