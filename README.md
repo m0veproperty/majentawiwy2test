@@ -14,7 +14,7 @@ npm run build
 ```
 
 ## 3D asset
-The repository ships the optimized runtime model as eight Git-safe chunks in `public/model-parts/`. The browser reconstructs these parts in memory and passes the resulting GLB to Three.js.
+The repository ships the optimized runtime model at `public/model-web.glb`.
 
 Runtime model:
 - ~13 MB transfer size
